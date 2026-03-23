@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 class PortfolioDataFetcher:
     """Fetch stock data from Alpha Vantage API"""
     
-    API_KEY = "6YjOWCSt43mR2zKX26j72kNEqEDZYT5b"
+    API_KEY = "ALPHA_VANTAGE_API_KEY"
     
     SECTORS = {
         'Technology': ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META'],
