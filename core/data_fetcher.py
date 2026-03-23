@@ -1,14 +1,15 @@
-# core/data_fetcher.py - Simplified version
+# core/data_fetcher.py
+"""
+Fetch stock data from Yahoo Finance with fallback to sample data
+"""
+
 import pandas as pd
 import numpy as np
-import requests
-import time
+import yfinance as yf
 from datetime import datetime, timedelta
 
 class PortfolioDataFetcher:
-    """Fetch stock data from Alpha Vantage API"""
-    
-    API_KEY = "ALPHA_VANTAGE_API_KEY"
+    """Fetch stock data from Yahoo Finance"""
     
     SECTORS = {
         'Technology': ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META'],
@@ -30,38 +31,24 @@ class PortfolioDataFetcher:
         return cls.SECTORS
     
     @classmethod
-    def fetch_single_stock(cls, ticker):
-        """Fetch a single stock from Alpha Vantage"""
-        try:
-            url = "https://www.alphavantage.co/query"
-            params = {
-                'function': 'TIME_SERIES_DAILY',
-                'symbol': ticker,
-                'apikey': cls.API_KEY,
-                'outputsize': 'compact'  # 'compact' returns last 100 days
-            }
-            
-            response = requests.get(url, params=params)
-            data = response.json()
-            
-            if 'Time Series (Daily)' in data:
-                daily_data = data['Time Series (Daily)']
-                df = pd.DataFrame.from_dict(daily_data, orient='index')
-                df = df.astype(float)
-                df.index = pd.to_datetime(df.index)
-                df = df.sort_index()
-                return df['4. close']
-            else:
-                print(f"   {ticker}: No data - {data.get('Note', 'Unknown error')[:50]}")
-                return None
-                
-        except Exception as e:
-            print(f"   {ticker}: Error - {str(e)[:50]}")
-            return None
+    def create_sample_data(cls, tickers, start_date, end_date):
+        """Create sample data as fallback when Yahoo Finance fails"""
+        print("   📊 Generating sample data for demonstration...")
+        dates = pd.date_range(start_date, end_date, freq='D')
+        np.random.seed(42)
+        
+        sample_data = {}
+        for ticker in tickers[:10]:
+            # Generate realistic price movements
+            returns = np.random.randn(len(dates)) * 0.02
+            price = 100 * np.exp(np.cumsum(returns))
+            sample_data[ticker] = price
+        
+        return pd.DataFrame(sample_data, index=dates)
     
     @classmethod
     def fetch_data(cls, tickers=None, start_date=None, end_date=None):
-        """Fetch historical data for multiple tickers"""
+        """Fetch historical data from Yahoo Finance with fallback"""
         
         if tickers is None:
             tickers = cls.get_all_tickers()
@@ -71,49 +58,64 @@ class PortfolioDataFetcher:
         if start_date is None:
             start_date = end_date - timedelta(days=2*365)
         
-        print(f"\n📊 Fetching data from Alpha Vantage")
+        print(f"\n📊 Fetching data for {len(tickers[:10])} stocks...")
         print(f"   From: {start_date.strftime('%Y-%m-%d')}")
         print(f"   To:   {end_date.strftime('%Y-%m-%d')}")
         print("-" * 60)
         
-        max_stocks = min(len(tickers), 5)  # Start with 5 for testing
-        print(f"   Fetching {max_stocks} stocks")
-        
-        data = {}
-        successful = 0
-        
-        for i, ticker in enumerate(tickers[:max_stocks]):
-            print(f"  [{i+1}/{max_stocks}] {ticker:6s}:", end=" ")
+        try:
+            # Try yfinance with a smaller set of stocks
+            tickers_to_fetch = tickers[:10]  # Limit to 10 for performance
+            data = yf.download(
+                tickers=tickers_to_fetch,
+                start=start_date,
+                end=end_date,
+                group_by='ticker',
+                auto_adjust=True,
+                progress=False,
+                threads=False
+            )
             
-            prices = cls.fetch_single_stock(ticker)
+            if data.empty:
+                print("⚠️ Yahoo Finance unavailable. Using sample data...")
+                return cls.create_sample_data(tickers[:10], start_date, end_date)
             
-            if prices is not None and not prices.empty:
-                # Filter by date range
-                mask = (prices.index >= pd.to_datetime(start_date)) & (prices.index <= pd.to_datetime(end_date))
-                prices = prices[mask]
-                
-                if not prices.empty:
-                    data[ticker] = prices
-                    successful += 1
-                    print(f"✓ ({len(prices)} days)")
+            # Extract close prices
+            if len(tickers_to_fetch) == 1:
+                if 'Close' in data.columns:
+                    prices = data[['Close']].copy()
+                    prices.columns = tickers_to_fetch
                 else:
-                    print(f"✗ (no data in range)")
+                    prices = data
             else:
-                print(f"✗")
+                try:
+                    if hasattr(data.columns, 'levels') and len(data.columns.levels) > 1:
+                        if 'Close' in data.columns.levels[1]:
+                            prices = data.xs('Close', axis=1, level=1)
+                        else:
+                            prices = data
+                    else:
+                        prices = data
+                except:
+                    prices = data
             
-            time.sleep(12)  # Rate limiting
-        
-        print("-" * 60)
-        print(f"✅ Loaded {successful}/{max_stocks} stocks")
-        
-        if successful == 0:
-            print("❌ No data retrieved")
-            return pd.DataFrame()
-        
-        return pd.DataFrame(data)
+            if isinstance(prices, pd.DataFrame) and not prices.empty:
+                prices = prices.dropna(axis=1, how='all')
+                if not prices.empty:
+                    print(f"✅ Loaded {len(prices.columns)} stocks from Yahoo Finance")
+                    return prices
+            
+            print("⚠️ No valid price data. Using sample data...")
+            return cls.create_sample_data(tickers[:10], start_date, end_date)
+            
+        except Exception as e:
+            print(f"⚠️ Error: {e}")
+            print("   Using sample data for demonstration...")
+            return cls.create_sample_data(tickers[:10], start_date, end_date)
     
     @classmethod
     def calculate_returns(cls, prices):
+        """Calculate daily returns"""
         if prices.empty:
             return pd.DataFrame(), pd.DataFrame()
         
