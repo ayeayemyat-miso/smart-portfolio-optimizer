@@ -1,6 +1,14 @@
 # 📊 Smart Portfolio Optimizer
 
 A comprehensive interactive dashboard for portfolio optimization using Modern Portfolio Theory (Markowitz), active portfolio management (Treynor-Black), value stock screening, Monte Carlo simulation, and portfolio comparison.
+🌐 Live Demo
+Try it yourself:(https://smart-portfolio-optimizer-0cr4.onrender.com/)
+
+Note: The free tier may take 1-5 minutes to wake up after inactivity.
+📊 Dashboard Preview
+<img width="928" height="434" alt="image" src="https://github.com/user-attachments/assets/43ef8a0b-ca78-476d-abb3-7044d6d54778" />
+
+
 
 ## 🚀 Features
 
