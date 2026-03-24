@@ -7,8 +7,7 @@ Try it yourself:(https://smart-portfolio-optimizer-0cr4.onrender.com/)
 
 Note: The free tier may take 1-5 minutes to wake up after inactivity.
 📊 Dashboard Preview
-<img width="928" height="434" alt="image" src="https://github.com/user-attachments/assets/43ef8a0b-ca78-476d-abb3-7044d6d54778" /><img width="907" height="400" alt="image" src="https://github.com/user-attachments/assets/c9713514-99b9-42e7-a77d-5c32c6af29e5" />
-
+<img width="928" height="434" alt="image" src="https://github.com/user-attachments/assets/43ef8a0b-ca78-476d-abb3-7044d6d54778" />
 
 ## 🚀 Features
 
@@ -74,14 +73,12 @@ Note: The free tier may take 1-5 minutes to wake up after inactivity.
 
 ### 6. **Additional Features**
 - Custom ticker addition
-- Download portfolio weights as CSV
-- Download performance metrics as CSV
+- Download portfolio report as CSV
 - Interactive controls with real-time updates
-- Responsive design with animations
 
 ## 📋 Requirements
 
-- Python 3.8 or higher
+- Python 3.12 or higher
 - Internet connection (for Yahoo Finance data)
 
 ## 🛠️ Installation
