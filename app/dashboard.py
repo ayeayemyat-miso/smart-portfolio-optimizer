@@ -1,6 +1,6 @@
-# app/dashboard.py - Complete Version with Company Names in Selector and Sector Allocation
+# app/dashboard.py - FIXED VERSION (Date parsing corrected)
 """
-Smart Portfolio Optimizer - Complete Version with Date Range Selection
+Smart Portfolio Optimizer - Complete Version with Company Names in Selector and Sector Allocation
 Includes: Markowitz, Treynor-Black, Value Screener, Monte Carlo, Portfolio Comparison
 """
 
@@ -76,27 +76,21 @@ def get_valuation_metrics_enhanced(ticker):
     """Enhanced version that tries Yahoo Finance first, then falls back to Alpha Vantage on Render"""
     global _original_valuation_function
     
-    # Import the original function if not already stored
     if _original_valuation_function is None:
-        from inspect import currentframe, getframeinfo
-        # Use the original get_valuation_metrics from the global scope
-        _original_valuation_function = globals().get('_original_get_valuation_metrics')
-        if _original_valuation_function is None:
-            # Define fallback original
-            def orig(ticker):
-                try:
-                    stock = yf.Ticker(ticker)
-                    info = stock.info
-                    return {
-                        'pe': info.get('trailingPE', None),
-                        'pb': info.get('priceToBook', None),
-                        'dividend': info.get('dividendYield', 0),
-                        'sector': info.get('sector', 'Unknown'),
-                        'roe': info.get('returnOnEquity', None)
-                    }
-                except:
-                    return {'pe': None, 'pb': None, 'dividend': 0, 'sector': 'Unknown', 'roe': None}
-            _original_valuation_function = orig
+        def orig(ticker):
+            try:
+                stock = yf.Ticker(ticker)
+                info = stock.info
+                return {
+                    'pe': info.get('trailingPE', None),
+                    'pb': info.get('priceToBook', None),
+                    'dividend': info.get('dividendYield', 0),
+                    'sector': info.get('sector', 'Unknown'),
+                    'roe': info.get('returnOnEquity', None)
+                }
+            except:
+                return {'pe': None, 'pb': None, 'dividend': 0, 'sector': 'Unknown', 'roe': None}
+        _original_valuation_function = orig
     
     # Try Yahoo Finance first
     result = _original_valuation_function(ticker)
@@ -126,8 +120,7 @@ def get_valuation_metrics(ticker):
     except:
         return {'pe': None, 'pb': None, 'dividend': 0, 'sector': 'Unknown', 'roe': None}
 
-# Store original and replace with enhanced version
-_original_get_valuation_metrics = get_valuation_metrics
+# Replace with enhanced version
 get_valuation_metrics = get_valuation_metrics_enhanced
 
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -138,18 +131,10 @@ app.title = "Smart Portfolio Optimizer"
 # Expanded Stock Universe (35 well-diversified stocks)
 # ============================================================
 EXPANDED_TICKERS = [
-    # Technology (8)
     'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META', 'ADBE', 'CRM', 'ORCL',
-    # Semiconductors (4)
-    'AMD', 'INTC', 'QCOM', 'TXN',
-    # Financial (6)
-    'JPM', 'V', 'MA', 'BAC', 'GS', 'AXP',
-    # Healthcare (6)
-    'JNJ', 'UNH', 'PFE', 'MRK', 'ABBV', 'LLY',
-    # Consumer (6)
-    'WMT', 'HD', 'COST', 'MCD', 'PG', 'KO',
-    # Industrial/Energy (5)
-    'XOM', 'CVX', 'CAT', 'BA', 'GE'
+    'AMD', 'INTC', 'QCOM', 'TXN', 'JPM', 'V', 'MA', 'BAC', 'GS', 'AXP',
+    'JNJ', 'UNH', 'PFE', 'MRK', 'ABBV', 'LLY', 'WMT', 'HD', 'COST', 
+    'MCD', 'PG', 'KO', 'XOM', 'CVX', 'CAT', 'BA', 'GE'
 ]
 
 OPTIMIZATION_GOALS = [
@@ -165,22 +150,16 @@ OPTIMIZATION_GOALS = [
 ]
 
 TARGET_RETURNS = {
-    'target_6': 0.06,
-    'target_8': 0.08,
-    'target_10': 0.10,
-    'target_12': 0.12,
-    'target_15': 0.15,
-    'target_20': 0.20
+    'target_6': 0.06, 'target_8': 0.08, 'target_10': 0.10,
+    'target_12': 0.12, 'target_15': 0.15, 'target_20': 0.20
 }
 
 BENCHMARKS = {
-    'S&P 500': '^GSPC',
-    'Nasdaq 100': '^NDX',
-    'Dow Jones': '^DJI',
-    'Russell 2000': '^RUT'
+    'S&P 500': '^GSPC', 'Nasdaq 100': '^NDX',
+    'Dow Jones': '^DJI', 'Russell 2000': '^RUT'
 }
 
-# Global variable to store data
+# Global variables
 _global_returns = None
 _global_sp500 = None
 _global_all_tickers = None
@@ -191,12 +170,9 @@ _company_name_cache = {}
 # ============================================================
 
 def get_company_name(ticker):
-    """Get company name for a ticker with caching"""
     global _company_name_cache
-    
     if ticker in _company_name_cache:
         return _company_name_cache[ticker]
-    
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -208,15 +184,13 @@ def get_company_name(ticker):
         return ticker
 
 def get_company_names_for_tickers(tickers):
-    """Get company names for multiple tickers"""
     company_names = {}
     for ticker in tickers:
         company_names[ticker] = get_company_name(ticker)
-        time.sleep(0.05)  # Small delay to avoid rate limiting
+        time.sleep(0.05)
     return company_names
 
 def get_sector_for_ticker(ticker):
-    """Get sector for a ticker"""
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -225,7 +199,6 @@ def get_sector_for_ticker(ticker):
         return 'Other'
 
 def compute_var_cvar(returns, confidence=0.95):
-    """Compute VaR and CVaR"""
     if len(returns) < 2:
         return np.nan, np.nan
     var = np.percentile(returns, (1-confidence)*100)
@@ -233,7 +206,6 @@ def compute_var_cvar(returns, confidence=0.95):
     return var, cvar
 
 def compute_skewness_kurtosis(returns):
-    """Compute skewness and kurtosis"""
     if len(returns) < 3:
         return np.nan, np.nan
     skew = stats.skew(returns)
@@ -241,14 +213,12 @@ def compute_skewness_kurtosis(returns):
     return skew, kurt
 
 def compute_rolling_sharpe(returns, window=63, rf=0.03/252):
-    """Compute rolling Sharpe ratio"""
     rolling_returns = returns.rolling(window).mean() * 252
     rolling_vol = returns.rolling(window).std() * np.sqrt(252)
     rolling_sharpe = (rolling_returns - rf) / rolling_vol
     return rolling_sharpe
 
 def fetch_data_for_dates(start_date, end_date, tickers):
-    """Fetch data for given date range"""
     global _global_returns, _global_sp500, _global_all_tickers
     
     print(f"\n📊 Fetching data from {start_date.date()} to {end_date.date()}")
@@ -264,7 +234,6 @@ def fetch_data_for_dates(start_date, end_date, tickers):
         print("❌ No data fetched!")
         return None, None, None
     
-    # Remove timezone
     if prices.index.tz is not None:
         prices.index = prices.index.tz_localize(None)
     
@@ -272,7 +241,6 @@ def fetch_data_for_dates(start_date, end_date, tickers):
     if daily_returns.index.tz is not None:
         daily_returns.index = daily_returns.index.tz_localize(None)
     
-    # Fetch benchmark
     benchmark_returns = None
     try:
         sp500 = yf.Ticker("^GSPC")
@@ -294,37 +262,23 @@ def fetch_data_for_dates(start_date, end_date, tickers):
     return daily_returns, benchmark_returns, _global_all_tickers
 
 def calculate_value_score(pe, pb, annual_return, annual_vol, dividend):
-    """Calculate value score based on multiple factors"""
     score = 0
-    
-    # P/E Score (lower is better)
     if pe and isinstance(pe, (int, float)) and pe > 0:
         if pe < 15: score += 3
         elif pe < 20: score += 2
         elif pe < 25: score += 1
-    
-    # P/B Score (lower is better)
     if pb and isinstance(pb, (int, float)) and pb > 0:
         if pb < 2: score += 2
         elif pb < 3: score += 1
-    
-    # Return Score (higher is better)
     if annual_return > 0.20: score += 3
     elif annual_return > 0.10: score += 2
     elif annual_return > 0.05: score += 1
-    
-    # Volatility Score (lower is better)
     if annual_vol < 0.15: score += 2
     elif annual_vol < 0.25: score += 1
-    
-    # Dividend Score
-    if dividend and dividend > 0.02:
-        score += 1
-    
+    if dividend and dividend > 0.02: score += 1
     return score
 
 def get_recommendation(score):
-    """Get recommendation based on score"""
     if score >= 7:
         return {'text': 'Strong Buy', 'color': '#155724', 'bg': '#d4edda', 'emoji': '🟢'}
     elif score >= 5:
@@ -335,7 +289,6 @@ def get_recommendation(score):
         return {'text': 'Sell', 'color': '#721c24', 'bg': '#f8d7da', 'emoji': '🔴'}
 
 def create_excel_report(weights_df, metrics, port_returns, selected_tickers, start_date, end_date):
-    """Create an Excel report with multiple sheets"""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         weights_df.to_excel(writer, sheet_name='Portfolio Weights', index=False)
@@ -356,7 +309,6 @@ def create_excel_report(weights_df, metrics, port_returns, selected_tickers, sta
 # Layout
 # ============================================================
 app.layout = html.Div([
-    # Header
     html.Div([
         html.H1("📊 Smart Portfolio Optimizer", 
                 style={'text-align': 'center', 'color': '#2c3e50', 'margin-top': '20px'}),
@@ -365,12 +317,9 @@ app.layout = html.Div([
         html.Hr(),
     ]),
     
-    # Controls
     html.Div([
-        # Sidebar
         html.Div([
             html.H3("⚙️ Portfolio Settings"),
-            
             html.Label("📅 Date Range:", style={'font-weight': 'bold', 'margin-top': '10px'}),
             dcc.DatePickerRange(
                 id='date-range',
@@ -379,17 +328,15 @@ app.layout = html.Div([
                 display_format='YYYY-MM-DD',
                 style={'width': '100%', 'margin-bottom': '20px'}
             ),
-            
             html.Label("📈 Select Stocks:", style={'font-weight': 'bold'}),
             dcc.Dropdown(
                 id='stock-selector',
-                options=[],  # Initially empty, will be populated after data loads
+                options=[],
                 value=['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META'],
                 multi=True,
                 placeholder="Search and select stocks...",
                 style={'margin-bottom': '20px'}
             ),
-            
             html.Label("🎯 Optimization Goal:", style={'font-weight': 'bold'}),
             dcc.Dropdown(
                 id='goal-selector',
@@ -397,7 +344,6 @@ app.layout = html.Div([
                 value='sharpe',
                 style={'margin-bottom': '20px'}
             ),
-            
             html.Label("💰 Risk-Free Rate (%):", style={'font-weight': 'bold'}),
             dcc.Slider(
                 id='rf-slider',
@@ -405,7 +351,6 @@ app.layout = html.Div([
                 marks={i: f'{i}%' for i in range(0, 6)},
                 tooltip={"placement": "bottom", "always_visible": True}
             ),
-            
             html.Label("📊 Benchmark:", style={'font-weight': 'bold'}),
             dcc.Dropdown(
                 id='benchmark-selector',
@@ -413,13 +358,11 @@ app.layout = html.Div([
                 value='^GSPC',
                 style={'margin-bottom': '20px'}
             ),
-            
             html.Button("📥 Download Excel Report", id="download-excel-btn", n_clicks=0,
                        style={'background': '#27ae60', 'color': 'white', 'border': 'none',
                               'padding': '10px 20px', 'border-radius': '5px', 
                               'cursor': 'pointer', 'margin-top': '10px', 'width': '100%'}),
             dcc.Download(id="download-excel"),
-            
             html.Div(id='data-status', style={'margin-top': '10px', 'padding': '10px', 
                                               'background': '#e8f4fd', 'border-radius': '8px',
                                               'font-size': '12px', 'text-align': 'center'}),
@@ -427,7 +370,6 @@ app.layout = html.Div([
                                              'background': '#f8f9fa', 'border-radius': '10px'})
         ], style={'width': '28%', 'display': 'inline-block', 'vertical-align': 'top', 'padding': '10px'}),
         
-        # Charts
         html.Div([
             dcc.Graph(id='frontier', style={'height': '400px'}),
             dcc.Graph(id='weights', style={'height': '400px'}),
@@ -439,7 +381,6 @@ app.layout = html.Div([
     
     html.Hr(),
     
-    # Tabs
     dcc.Tabs(id='tabs', value='markowitz', children=[
         dcc.Tab(label='📊 Markowitz', value='markowitz'),
         dcc.Tab(label='📈 Treynor-Black', value='active'),
@@ -451,7 +392,7 @@ app.layout = html.Div([
 ])
 
 # ============================================================
-# Data Loading Callback
+# Data Loading Callback - FIXED DATE PARSING
 # ============================================================
 
 @app.callback(
@@ -469,8 +410,9 @@ def load_data_on_date_change(start_date, end_date):
         return "⚠️ Please select date range", [], ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META']
     
     try:
+        # FIXED: Correct order of date parsing
         start = datetime.strptime(start_date, '%Y-%m-%d')
-        end = datetime.strptime(end_date, '%Y-%d-%m')
+        end = datetime.strptime(end_date, '%Y-%m-%d')
         
         if start >= end:
             return "⚠️ End date must be after start date", [], ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META']
@@ -484,15 +426,12 @@ def load_data_on_date_change(start_date, end_date):
         _global_sp500 = benchmark_returns
         _global_all_tickers = tickers
         
-        # Get company names for all tickers
         print("Fetching company names...")
         company_names = get_company_names_for_tickers(tickers)
         
-        # Create options with company names
         options = []
         for ticker in tickers:
             company_name = company_names.get(ticker, ticker)
-            # Truncate long company names
             if len(company_name) > 45:
                 company_name = company_name[:42] + "..."
             options.append({
@@ -500,7 +439,6 @@ def load_data_on_date_change(start_date, end_date):
                 'value': ticker
             })
         
-        # Set default selection to first 5 available tickers
         default_selection = [t for t in ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META'] if t in tickers]
         if len(default_selection) < 2:
             default_selection = tickers[:5]
@@ -530,7 +468,6 @@ def load_data_on_date_change(start_date, end_date):
     prevent_initial_call=True
 )
 def download_excel(n_clicks, selected_tickers, goal, rf, start_date, end_date):
-    """Generate and download Excel report"""
     global _global_returns
     
     if _global_returns is None or not selected_tickers or len(selected_tickers) < 2:
@@ -566,7 +503,6 @@ def download_excel(n_clicks, selected_tickers, goal, rf, start_date, end_date):
     metrics['VaR (95%)'] = f'{var95*100:.2f}%' if not np.isnan(var95) else 'N/A'
     metrics['CVaR (95%)'] = f'{cvar95*100:.2f}%' if not np.isnan(cvar95) else 'N/A'
     metrics['VaR (99%)'] = f'{var99*100:.2f}%' if not np.isnan(var99) else 'N/A'
-    
     metrics['Portfolio Strategy'] = title
     metrics['Number of Assets'] = len(selected_tickers)
     metrics['Risk-Free Rate'] = f"{rf}%"
@@ -583,7 +519,7 @@ def download_excel(n_clicks, selected_tickers, goal, rf, start_date, end_date):
     return dcc.send_bytes(excel_data.getvalue(), f"portfolio_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
 
 # ============================================================
-# Markowitz Callback with Sector Allocation
+# Markowitz Callback
 # ============================================================
 
 @app.callback(
@@ -601,10 +537,7 @@ def download_excel(n_clicks, selected_tickers, goal, rf, start_date, end_date):
      Input('date-range', 'end_date')]
 )
 def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, end_date):
-    """Update Markowitz charts with selected date range"""
     global _global_returns, _global_sp500
-    
-    print(f"\n--- Updating Markowitz ---")
     
     if _global_returns is None:
         empty = go.Figure()
@@ -616,7 +549,6 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
         empty.update_layout(title="Select at least 2 stocks")
         return empty, empty, empty, empty, "Select at least 2 stocks", []
     
-    # Filter to available tickers
     available_tickers = [t for t in selected_tickers if t in _global_returns.columns]
     if len(available_tickers) < 2:
         empty = go.Figure()
@@ -624,12 +556,9 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
         return empty, empty, empty, empty, "Selected stocks not available", []
     
     rets = _global_returns[available_tickers].dropna()
-    print(f"Returns shape: {rets.shape}")
-    
     rf_dec = rf / 100
     optimizer = PortfolioOptimizer(rets, risk_free_rate=rf_dec)
     
-    # Get weights based on goal
     if goal == 'sharpe':
         weights = optimizer.optimize_max_sharpe()
         title = "Maximum Sharpe Ratio Portfolio"
@@ -647,7 +576,6 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
         weights = np.array([1/len(available_tickers)] * len(available_tickers))
     
     ret, risk, sharpe = optimizer.portfolio_performance(weights)
-    print(f"Portfolio: Return={ret*100:.2f}%, Risk={risk:.2f}%, Sharpe={sharpe:.2f}")
     
     # Efficient Frontier
     frontier = optimizer.efficient_frontier()
@@ -684,7 +612,7 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
     ))
     fig_weights.update_layout(title='Portfolio Allocation', yaxis_title='Weight (%)', template='plotly_white')
     
-    # Rolling Sharpe Ratio
+    # Rolling Sharpe
     port_returns = rets.dot(weights)
     rolling_sharpe = compute_rolling_sharpe(port_returns, window=63, rf=rf_dec/252)
     fig_rolling = go.Figure()
@@ -700,7 +628,7 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
                               xaxis_title='Date', yaxis_title='Sharpe Ratio',
                               template='plotly_white')
     
-    # Sector Allocation Chart
+    # Sector Allocation
     sector_weights = {}
     for i, ticker in enumerate(available_tickers):
         sector = get_sector_for_ticker(ticker)
@@ -725,27 +653,17 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
     # Summary
     summary = html.Div([
         html.H4("📈 Portfolio Summary", style={'margin-bottom': '10px'}),
-        html.Div([
-            html.Span("📊 Expected Annual Return: ", style={'font-weight': 'bold'}),
-            html.Span(f"{ret*100:.2f}%", style={'color': '#27ae60', 'font-weight': 'bold'})
-        ]),
-        html.Div([
-            html.Span("⚠️ Expected Annual Risk: ", style={'font-weight': 'bold'}),
-            html.Span(f"{risk:.2f}%", style={'color': '#e74c3c', 'font-weight': 'bold'})
-        ]),
-        html.Div([
-            html.Span("⭐ Sharpe Ratio: ", style={'font-weight': 'bold'}),
-            html.Span(f"{sharpe:.2f}", style={'color': '#3498db', 'font-weight': 'bold'})
-        ]),
+        html.Div([html.Span("📊 Expected Annual Return: ", style={'font-weight': 'bold'}), html.Span(f"{ret*100:.2f}%", style={'color': '#27ae60', 'font-weight': 'bold'})]),
+        html.Div([html.Span("⚠️ Expected Annual Risk: ", style={'font-weight': 'bold'}), html.Span(f"{risk:.2f}%", style={'color': '#e74c3c', 'font-weight': 'bold'})]),
+        html.Div([html.Span("⭐ Sharpe Ratio: ", style={'font-weight': 'bold'}), html.Span(f"{sharpe:.2f}", style={'color': '#3498db', 'font-weight': 'bold'})]),
         html.Hr(),
         html.H5("🏆 Top Holdings:"),
         html.Ul([html.Li(f"{row['Asset']}: {row['Weight (%)']:.1f}%") for _, row in weights_df.head(5).iterrows()])
     ])
     
-    # Metrics with VaR, CVaR, Skewness, Kurtosis
+    # Metrics
     cum = (1 + port_returns).cumprod()
     
-    # Get benchmark returns
     if _global_sp500 is not None:
         common_idx = port_returns.index.intersection(_global_sp500.index)
         benchmark_aligned = _global_sp500.loc[common_idx]
@@ -753,7 +671,6 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
     else:
         metrics = PerformanceEvaluator.get_all_metrics(port_returns, cum, risk_free_rate=rf_dec)
     
-    # Add risk metrics
     var95, cvar95 = compute_var_cvar(port_returns, 0.95)
     var99, cvar99 = compute_var_cvar(port_returns, 0.99)
     skew, kurt = compute_skewness_kurtosis(port_returns)
@@ -781,7 +698,6 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
                 html.P(val, style={'font-size': '18px', 'font-weight': 'bold', 'margin': '0', 'color': metric_colors[key]})
             ], style={'background': '#f8f9fa', 'padding': '12px', 'border-radius': '8px', 'min-width': '110px', 'text-align': 'center'}))
     
-    print("✅ Markowitz update completed")
     return fig_front, fig_weights, fig_rolling, fig_sector, summary, metrics_display
 
 # ============================================================
@@ -799,11 +715,10 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
      Input('date-range', 'end_date')]
 )
 def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, end_date):
-    """Update tab content with all features"""
     global _global_returns, _global_sp500
     
     if _global_returns is None:
-        return html.Div("Loading data...")
+        return html.Div("Loading data... Please wait")
     
     if tab == 'markowitz':
         return html.Div([
@@ -812,7 +727,6 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             html.P(f"Analysis Period: {start_date} to {end_date}", style={'color': '#7f8c8d'})
         ])
     
-    # ==================== TREYNOR-BLACK ACTIVE TAB ====================
     elif tab == 'active':
         if not selected_tickers or len(selected_tickers) < 2:
             return html.Div("Select at least 2 stocks")
@@ -852,16 +766,8 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             style_cell={'textAlign': 'center'},
             style_header={'backgroundColor': '#2c3e50', 'color': 'white'},
             style_data_conditional=[
-                {
-                    'if': {'filter_query': '{Alpha (Annual)} contains "-"'},
-                    'backgroundColor': '#f8d7da',
-                    'color': '#721c24'
-                },
-                {
-                    'if': {'filter_query': '{Alpha (Annual)} > 0'},
-                    'backgroundColor': '#d4edda',
-                    'color': '#155724'
-                }
+                {'if': {'filter_query': '{Alpha (Annual)} contains "-"'}, 'backgroundColor': '#f8d7da', 'color': '#721c24'},
+                {'if': {'filter_query': '{Alpha (Annual)} > 0'}, 'backgroundColor': '#d4edda', 'color': '#155724'}
             ]
         )
         
@@ -873,7 +779,6 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             table
         ])
     
-    # ==================== VALUE SCREENER TAB ====================
     elif tab == 'value':
         if not selected_tickers:
             return html.Div("Select stocks to analyze")
@@ -911,32 +816,16 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             style_cell={'textAlign': 'center'},
             style_header={'backgroundColor': '#2c3e50', 'color': 'white'},
             style_data_conditional=[
-                {
-                    'if': {'filter_query': '{Value Score} >= 7'},
-                    'backgroundColor': '#d4edda',
-                    'color': '#155724'
-                },
-                {
-                    'if': {'filter_query': '{Value Score} >= 5 && {Value Score} < 7'},
-                    'backgroundColor': '#fff3cd',
-                    'color': '#856404'
-                },
-                {
-                    'if': {'filter_query': '{Value Score} < 5'},
-                    'backgroundColor': '#f8d7da',
-                    'color': '#721c24'
-                }
+                {'if': {'filter_query': '{Value Score} >= 7'}, 'backgroundColor': '#d4edda', 'color': '#155724'},
+                {'if': {'filter_query': '{Value Score} >= 5 && {Value Score} < 7'}, 'backgroundColor': '#fff3cd', 'color': '#856404'},
+                {'if': {'filter_query': '{Value Score} < 5'}, 'backgroundColor': '#f8d7da', 'color': '#721c24'}
             ],
             page_size=15
         )
         
-        # Show data source info
-        data_source = "Alpha Vantage (Render)" if os.environ.get("RENDER") else "Yahoo Finance (Local)"
-        
         return html.Div([
             html.H3("💰 Value Stock Screener", style={'margin-bottom': '20px'}),
             html.P(f"Analysis Period: {start_date} to {end_date}", style={'color': '#7f8c8d'}),
-            html.P(f"📡 Data Source: {data_source}", style={'color': '#27ae60', 'font-size': '12px'}),
             html.Div([
                 html.H4("📊 Scoring System:"),
                 html.Ul([
@@ -950,7 +839,6 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             table
         ])
     
-    # ==================== MONTE CARLO TAB ====================
     elif tab == 'monte':
         if not selected_tickers or len(selected_tickers) < 2:
             return html.Div("Select at least 2 stocks")
@@ -1015,7 +903,6 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             dcc.Graph(figure=fig_hist)
         ])
     
-    # ==================== COMPARE PORTFOLIOS TAB ====================
     elif tab == 'compare':
         if not selected_tickers or len(selected_tickers) < 2:
             return html.Div("Select at least 2 stocks")
@@ -1072,4 +959,4 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
 # ============================================================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8050))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
