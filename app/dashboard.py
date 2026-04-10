@@ -21,86 +21,114 @@ import base64
 import io
 from scipy import stats
 import time
-
-warnings.filterwarnings('ignore')
-# Add this after your existing imports (around line 25)
-import os
 import requests
 
-# ========== ALPHA VANTAGE INTEGRATION FOR RENDER ==========
-class AlphaVantageFetcher:
-    """Fetch real-time fundamentals from Alpha Vantage API"""
-    
-    API_KEY = os.environ.get("ALPHA_VANTAGE_KEY")
-    BASE_URL = "https://www.alphavantage.co/query"
-    
-    @classmethod
-    def get_fundamentals(cls, ticker):
-        """Get P/E, P/B, dividend, sector for a ticker"""
-        if not cls.API_KEY:
-            return None
-        
-        try:
-            params = {
-                'function': 'OVERVIEW',
-                'symbol': ticker,
-                'apikey': cls.API_KEY
-            }
-            response = requests.get(cls.BASE_URL, params=params, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data and 'Symbol' in data:
-                    # Parse dividend yield (convert from percentage to decimal)
-                    div_yield = data.get('DividendYield', '0')
-                    try:
-                        div_yield = float(div_yield) / 100 if div_yield and div_yield != 'None' else 0
-                    except:
-                        div_yield = 0
-                    
-                    # Parse P/E
-                    pe = data.get('PERatio', None)
-                    try:
-                        pe = float(pe) if pe and pe != 'None' else None
-                    except:
-                        pe = None
-                    
-                    # Parse P/B
-                    pb = data.get('PriceToBookRatio', None)
-                    try:
-                        pb = float(pb) if pb and pb != 'None' else None
-                    except:
-                        pb = None
-                    
-                    return {
-                        'pe': pe,
-                        'pb': pb,
-                        'dividend': div_yield,
-                        'sector': data.get('Sector', 'Unknown'),
-                        'industry': data.get('Industry', 'Unknown'),
-                        'name': data.get('Name', ticker)
-                    }
-        except Exception as e:
-            print(f"Alpha Vantage error for {ticker}: {e}")
-        
-        return None
-    
-    @classmethod
-    def get_batch_fundamentals(cls, tickers):
-        """Get fundamentals for multiple tickers with rate limiting"""
-        results = {}
-        for i, ticker in enumerate(tickers[:10]):  # Limit to 10 for performance
-            print(f"Fetching {ticker} from Alpha Vantage...")
-            data = cls.get_fundamentals(ticker)
-            if data:
-                results[ticker] = data
-            time.sleep(12)  # Rate limit: 5 calls per minute
-        return results
+warnings.filterwarnings('ignore')
 
 from core.data_fetcher import PortfolioDataFetcher
 from core.optimizer import PortfolioOptimizer
 from core.evaluator import PerformanceEvaluator
 from core.treynor_black import TreynorBlackOptimizer
+
+# ============================================================
+# RENDER FALLBACK - ALPHA VANTAGE FOR WHEN YAHOO FINANCE IS BLOCKED
+# ============================================================
+
+def get_valuation_metrics_fallback(ticker):
+    """Fallback function for Render when Yahoo Finance is blocked"""
+    api_key = os.environ.get("ALPHA_VANTAGE_KEY")
+    if not api_key:
+        return None
+    
+    try:
+        url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={api_key}"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'Symbol' in data:
+                pe = data.get('PERatio')
+                pb = data.get('PriceToBookRatio')
+                div = data.get('DividendYield', '0')
+                sector = data.get('Sector', 'Unknown')
+                
+                try:
+                    div = float(div) / 100 if div and div != 'None' else 0
+                except:
+                    div = 0
+                
+                return {
+                    'pe': float(pe) if pe and pe != 'None' else None,
+                    'pb': float(pb) if pb and pb != 'None' else None,
+                    'dividend': div,
+                    'sector': sector,
+                    'roe': None
+                }
+    except Exception as e:
+        print(f"Alpha Vantage fallback error for {ticker}: {e}")
+    
+    return None
+
+# Store original function
+_original_valuation_function = None
+
+def get_valuation_metrics_enhanced(ticker):
+    """Enhanced version that tries Yahoo Finance first, then falls back to Alpha Vantage on Render"""
+    global _original_valuation_function
+    
+    # Import the original function if not already stored
+    if _original_valuation_function is None:
+        from inspect import currentframe, getframeinfo
+        # Use the original get_valuation_metrics from the global scope
+        _original_valuation_function = globals().get('_original_get_valuation_metrics')
+        if _original_valuation_function is None:
+            # Define fallback original
+            def orig(ticker):
+                try:
+                    stock = yf.Ticker(ticker)
+                    info = stock.info
+                    return {
+                        'pe': info.get('trailingPE', None),
+                        'pb': info.get('priceToBook', None),
+                        'dividend': info.get('dividendYield', 0),
+                        'sector': info.get('sector', 'Unknown'),
+                        'roe': info.get('returnOnEquity', None)
+                    }
+                except:
+                    return {'pe': None, 'pb': None, 'dividend': 0, 'sector': 'Unknown', 'roe': None}
+            _original_valuation_function = orig
+    
+    # Try Yahoo Finance first
+    result = _original_valuation_function(ticker)
+    
+    # If Yahoo Finance failed (returns None for PE) and we're on Render, try Alpha Vantage
+    if result and result.get('pe') is None and os.environ.get("RENDER"):
+        print(f"Yahoo Finance failed for {ticker}, trying Alpha Vantage fallback...")
+        fallback_result = get_valuation_metrics_fallback(ticker)
+        if fallback_result:
+            return fallback_result
+    
+    return result
+
+# Define the original get_valuation_metrics function
+def get_valuation_metrics(ticker):
+    """Get valuation metrics for a stock with scoring"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        return {
+            'pe': info.get('trailingPE', None),
+            'pb': info.get('priceToBook', None),
+            'dividend': info.get('dividendYield', 0),
+            'sector': info.get('sector', 'Unknown'),
+            'roe': info.get('returnOnEquity', None)
+        }
+    except:
+        return {'pe': None, 'pb': None, 'dividend': 0, 'sector': 'Unknown', 'roe': None}
+
+# Store original and replace with enhanced version
+_original_get_valuation_metrics = get_valuation_metrics
+get_valuation_metrics = get_valuation_metrics_enhanced
 
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 server = app.server
@@ -264,21 +292,6 @@ def fetch_data_for_dates(start_date, end_date, tickers):
     print(f"✅ Data loaded: {len(_global_all_tickers)} stocks, {len(daily_returns)} days")
     
     return daily_returns, benchmark_returns, _global_all_tickers
-
-def get_valuation_metrics(ticker):
-    """Get valuation metrics for a stock with scoring"""
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        return {
-            'pe': info.get('trailingPE', None),
-            'pb': info.get('priceToBook', None),
-            'dividend': info.get('dividendYield', 0),
-            'sector': info.get('sector', 'Unknown'),
-            'roe': info.get('returnOnEquity', None)
-        }
-    except:
-        return {'pe': None, 'pb': None, 'dividend': 0, 'sector': 'Unknown', 'roe': None}
 
 def calculate_value_score(pe, pb, annual_return, annual_vol, dividend):
     """Calculate value score based on multiple factors"""
@@ -457,7 +470,7 @@ def load_data_on_date_change(start_date, end_date):
     
     try:
         start = datetime.strptime(start_date, '%Y-%m-%d')
-        end = datetime.strptime(end_date, '%Y-%m-%d')
+        end = datetime.strptime(end_date, '%Y-%d-%m')
         
         if start >= end:
             return "⚠️ End date must be after start date", [], ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META']
@@ -917,9 +930,13 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             page_size=15
         )
         
+        # Show data source info
+        data_source = "Alpha Vantage (Render)" if os.environ.get("RENDER") else "Yahoo Finance (Local)"
+        
         return html.Div([
             html.H3("💰 Value Stock Screener", style={'margin-bottom': '20px'}),
             html.P(f"Analysis Period: {start_date} to {end_date}", style={'color': '#7f8c8d'}),
+            html.P(f"📡 Data Source: {data_source}", style={'color': '#27ae60', 'font-size': '12px'}),
             html.Div([
                 html.H4("📊 Scoring System:"),
                 html.Ul([
@@ -1055,4 +1072,4 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
 # ============================================================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8050))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=True)
