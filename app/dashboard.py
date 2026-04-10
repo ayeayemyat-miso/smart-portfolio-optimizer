@@ -1,6 +1,6 @@
-# app/dashboard.py - FIXED VERSION (Date parsing corrected)
+# app/dashboard.py - COMPLETE WORKING VERSION FOR RENDER
 """
-Smart Portfolio Optimizer - Complete Version with Company Names in Selector and Sector Allocation
+Smart Portfolio Optimizer - Complete Version with Date Range Selection
 Includes: Markowitz, Treynor-Black, Value Screener, Monte Carlo, Portfolio Comparison
 """
 
@@ -69,59 +69,35 @@ def get_valuation_metrics_fallback(ticker):
     
     return None
 
-# Store original function
-_original_valuation_function = None
-
-def get_valuation_metrics_enhanced(ticker):
-    """Enhanced version that tries Yahoo Finance first, then falls back to Alpha Vantage on Render"""
-    global _original_valuation_function
-    
-    if _original_valuation_function is None:
-        def orig(ticker):
-            try:
-                stock = yf.Ticker(ticker)
-                info = stock.info
-                return {
-                    'pe': info.get('trailingPE', None),
-                    'pb': info.get('priceToBook', None),
-                    'dividend': info.get('dividendYield', 0),
-                    'sector': info.get('sector', 'Unknown'),
-                    'roe': info.get('returnOnEquity', None)
-                }
-            except:
-                return {'pe': None, 'pb': None, 'dividend': 0, 'sector': 'Unknown', 'roe': None}
-        _original_valuation_function = orig
-    
-    # Try Yahoo Finance first
-    result = _original_valuation_function(ticker)
-    
-    # If Yahoo Finance failed (returns None for PE) and we're on Render, try Alpha Vantage
-    if result and result.get('pe') is None and os.environ.get("RENDER"):
-        print(f"Yahoo Finance failed for {ticker}, trying Alpha Vantage fallback...")
-        fallback_result = get_valuation_metrics_fallback(ticker)
-        if fallback_result:
-            return fallback_result
-    
-    return result
-
-# Define the original get_valuation_metrics function
+# Enhanced valuation function that tries Yahoo Finance first, then Alpha Vantage
 def get_valuation_metrics(ticker):
-    """Get valuation metrics for a stock with scoring"""
+    """Get valuation metrics for a stock with fallback for Render"""
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        return {
+        result = {
             'pe': info.get('trailingPE', None),
             'pb': info.get('priceToBook', None),
             'dividend': info.get('dividendYield', 0),
             'sector': info.get('sector', 'Unknown'),
             'roe': info.get('returnOnEquity', None)
         }
+        
+        # If on Render and Yahoo Finance returned None, try Alpha Vantage
+        if os.environ.get("RENDER") and result.get('pe') is None:
+            print(f"Yahoo Finance failed for {ticker}, trying Alpha Vantage fallback...")
+            fallback = get_valuation_metrics_fallback(ticker)
+            if fallback:
+                return fallback
+        
+        return result
     except:
+        # If on Render, try Alpha Vantage
+        if os.environ.get("RENDER"):
+            fallback = get_valuation_metrics_fallback(ticker)
+            if fallback:
+                return fallback
         return {'pe': None, 'pb': None, 'dividend': 0, 'sector': 'Unknown', 'roe': None}
-
-# Replace with enhanced version
-get_valuation_metrics = get_valuation_metrics_enhanced
 
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 server = app.server
@@ -331,7 +307,7 @@ app.layout = html.Div([
             html.Label("📈 Select Stocks:", style={'font-weight': 'bold'}),
             dcc.Dropdown(
                 id='stock-selector',
-                options=[],
+                options=[{'label': ticker, 'value': ticker} for ticker in ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META']],
                 value=['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META'],
                 multi=True,
                 placeholder="Search and select stocks...",
@@ -392,7 +368,7 @@ app.layout = html.Div([
 ])
 
 # ============================================================
-# Data Loading Callback - FIXED DATE PARSING
+# Data Loading Callback - SIMPLIFIED FOR RENDER
 # ============================================================
 
 @app.callback(
@@ -403,42 +379,37 @@ app.layout = html.Div([
      Input('date-range', 'end_date')]
 )
 def load_data_on_date_change(start_date, end_date):
-    """Load data when date range changes"""
+    """Load data when date range changes - Simplified for Render"""
     global _global_returns, _global_sp500, _global_all_tickers
     
+    # Default fallback options
+    default_options = [{'label': ticker, 'value': ticker} for ticker in ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META', 'TSLA', 'AMZN']]
+    default_value = ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META']
+    
     if not start_date or not end_date:
-        return "⚠️ Please select date range", [], ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META']
+        return "⚠️ Please select date range", default_options, default_value
     
     try:
-        # FIXED: Correct order of date parsing
         start = datetime.strptime(start_date, '%Y-%m-%d')
         end = datetime.strptime(end_date, '%Y-%m-%d')
         
         if start >= end:
-            return "⚠️ End date must be after start date", [], ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META']
+            return "⚠️ End date must be after start date", default_options, default_value
         
+        # Try to fetch data
         daily_returns, benchmark_returns, tickers = fetch_data_for_dates(start, end, EXPANDED_TICKERS)
         
         if daily_returns is None or daily_returns.empty:
-            return "❌ No data available for selected dates", [], ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META']
+            return "❌ No data available for selected dates", default_options, default_value
         
         _global_returns = daily_returns
         _global_sp500 = benchmark_returns
         _global_all_tickers = tickers
         
-        print("Fetching company names...")
-        company_names = get_company_names_for_tickers(tickers)
+        # Create simple options (just tickers, no company names to avoid errors)
+        options = [{'label': ticker, 'value': ticker} for ticker in tickers]
         
-        options = []
-        for ticker in tickers:
-            company_name = company_names.get(ticker, ticker)
-            if len(company_name) > 45:
-                company_name = company_name[:42] + "..."
-            options.append({
-                'label': f"{ticker} - {company_name}",
-                'value': ticker
-            })
-        
+        # Default selection
         default_selection = [t for t in ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META'] if t in tickers]
         if len(default_selection) < 2:
             default_selection = tickers[:5]
@@ -448,10 +419,10 @@ def load_data_on_date_change(start_date, end_date):
         return status, options, default_selection
         
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error in load_data: {e}")
         import traceback
         traceback.print_exc()
-        return f"❌ Error: {str(e)[:50]}", [], ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META']
+        return f"❌ Error: {str(e)[:50]}", default_options, default_value
 
 # ============================================================
 # Excel Download Callback
