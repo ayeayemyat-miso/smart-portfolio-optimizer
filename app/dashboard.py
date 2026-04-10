@@ -1,8 +1,8 @@
-# app/dashboard.py - Complete Production Version
+# app/dashboard.py - Complete Production Version (No API Keys Required)
 """
 Smart Portfolio Optimizer - Complete Version with Date Range Selection
 Includes: Markowitz, Treynor-Black, Value Screener, Monte Carlo, Portfolio Comparison
-Works on both Local (Yahoo Finance) and Render (Alpha Vantage)
+Works on both Local and Render using Yahoo Finance directly
 """
 
 import sys
@@ -31,16 +31,13 @@ from core.optimizer import PortfolioOptimizer
 from core.evaluator import PerformanceEvaluator
 from core.treynor_black import TreynorBlackOptimizer
 
-# Configure logging for Render debugging
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 server = app.server
 app.title = "Smart Portfolio Optimizer"
-
-# Detect environment
-IS_RENDER = os.environ.get('RENDER', False) or os.environ.get('ALPHA_VANTAGE_KEY') is not None
 
 # ============================================================
 # Expanded Stock Universe (35 well-diversified stocks)
@@ -214,7 +211,7 @@ def create_excel_report(weights_df, metrics, port_returns, selected_tickers, sta
             'Info': ['Analysis Start Date', 'Analysis End Date', 'Number of Assets', 'Generated On', 'Data Source'],
             'Value': [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), 
                      len(selected_tickers), datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                     'Alpha Vantage (Cloud)' if IS_RENDER else 'Yahoo Finance (Local)']
+                     'Yahoo Finance (Real-time)']
         })
         info_df.to_excel(writer, sheet_name='Report Info', index=False)
         output.seek(0)
@@ -232,7 +229,7 @@ app.layout = html.Div([
                style={'text-align': 'center', 'color': '#7f8c8d', 'margin-bottom': '20px'}),
         html.Div([
             html.Span(
-                "🌐 Running on Cloud (Alpha Vantage)" if IS_RENDER else "💻 Running Locally (Yahoo Finance)",
+                "📊 Using Yahoo Finance (Real-time Data)",
                 style={'fontSize': '12px', 'padding': '5px 10px', 'backgroundColor': '#e8f4fd', 
                        'borderRadius': '5px', 'display': 'inline-block'}
             )
@@ -379,7 +376,7 @@ def load_data_on_date_change(start_date, end_date):
         if len(default_selection) < 2:
             default_selection = tickers[:5]
         
-        status = f"✅ Data loaded: {len(tickers)} stocks | {len(daily_returns)} days | Source: {'Alpha Vantage' if IS_RENDER else 'Yahoo Finance'}"
+        status = f"✅ Data loaded: {len(tickers)} stocks | {len(daily_returns)} days | Yahoo Finance"
         
         return status, options, default_selection
         
@@ -659,132 +656,7 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
     return fig_front, fig_weights, fig_rolling, fig_sector, summary, metrics_display
 
 # ============================================================
-# Value Screener Helper Functions (for both local and cloud)
-# ============================================================
-
-def get_value_screener_data_local(tickers, returns_data, start_date, end_date):
-    """Get value screener data using Yahoo Finance (Local)"""
-    from core.data_fetcher import PortfolioDataFetcher
-    
-    stocks_data = []
-    summaries_df = PortfolioDataFetcher.get_all_companies_summary(tickers)
-    
-    for _, row in summaries_df.iterrows():
-        ticker = row['ticker']
-        if returns_data is not None and ticker in returns_data.columns:
-            rets = returns_data[ticker].dropna()
-            if len(rets) > 0:
-                annual_return = (1 + rets.mean()) ** 252 - 1
-                annual_return_display = f"{annual_return*100:.1f}%"
-            else:
-                annual_return_display = row.get('annual_return', 'N/A')
-        else:
-            annual_return_display = row.get('annual_return', 'N/A')
-        
-        stocks_data.append({
-            'Ticker': ticker,
-            'P/E': row.get('pe_ratio', 'N/A'),
-            'P/B': row.get('pb_ratio', 'N/A'),
-            'Div Yield': row.get('dividend_yield', 'N/A'),
-            'Ann Return': annual_return_display,
-            'Value Score': row.get('value_score', 3),
-            'Recommendation': row.get('recommendation', '⚪ Hold'),
-            'Sector': row.get('sector', 'Unknown')
-        })
-    
-    return stocks_data
-
-def get_value_screener_data_cloud(tickers, returns_data, start_date, end_date):
-    """Get value screener data using Alpha Vantage (Cloud/Render)"""
-    try:
-        from core.render_fundamentals import RenderFundamentalsFetcher
-        
-        if not RenderFundamentalsFetcher.is_available():
-            return None, "Alpha Vantage API key not configured. Please add ALPHA_VANTAGE_KEY to environment variables."
-        
-        fundamentals_data = RenderFundamentalsFetcher.get_batch_fundamentals(tickers, delay=1.2)
-        stocks_data = []
-        
-        for ticker in tickers:
-            data = fundamentals_data.get(ticker)
-            
-            # Get returns data
-            if returns_data is not None and ticker in returns_data.columns:
-                rets = returns_data[ticker].dropna()
-                if len(rets) > 0:
-                    annual_return = (1 + rets.mean()) ** 252 - 1
-                    annual_return_pct = f"{annual_return*100:.1f}%"
-                else:
-                    annual_return_pct = "N/A"
-            else:
-                annual_return_pct = "N/A"
-            
-            if data:
-                # Calculate value score
-                score = 3
-                pe = data.get('pe_ratio')
-                pb = data.get('pb_ratio')
-                div_yield = data.get('dividend_yield', 0)
-                
-                if pe and isinstance(pe, (int, float)) and pe > 0:
-                    if pe < 15: score += 2
-                    elif pe < 20: score += 1
-                    elif pe > 30: score -= 1
-                
-                if pb and isinstance(pb, (int, float)) and pb > 0:
-                    if pb < 2: score += 2
-                    elif pb < 3: score += 1
-                    elif pb > 5: score -= 1
-                
-                if div_yield and div_yield > 0:
-                    if div_yield > 0.04: score += 2
-                    elif div_yield > 0.02: score += 1
-                
-                if annual_return_pct != "N/A":
-                    annual_return_val = float(annual_return_pct.replace('%', '')) / 100
-                    if annual_return_val > 0.15: score += 2
-                    elif annual_return_val > 0.08: score += 1
-                
-                value_score = min(10, max(0, score))
-                
-                if value_score >= 7:
-                    rec = "🟢 Strong Buy"
-                elif value_score >= 5:
-                    rec = "🟡 Buy"
-                elif value_score >= 3:
-                    rec = "🟠 Hold"
-                else:
-                    rec = "🔴 Sell"
-                
-                stocks_data.append({
-                    'Ticker': ticker,
-                    'P/E': f"{pe:.1f}" if pe else "N/A",
-                    'P/B': f"{pb:.2f}" if pb else "N/A",
-                    'Div Yield': f"{div_yield*100:.1f}%" if div_yield and div_yield > 0 else "N/A",
-                    'Ann Return': annual_return_pct,
-                    'Value Score': value_score,
-                    'Recommendation': rec,
-                    'Sector': data.get('sector', 'Unknown')
-                })
-            else:
-                stocks_data.append({
-                    'Ticker': ticker,
-                    'P/E': "N/A",
-                    'P/B': "N/A",
-                    'Div Yield': "N/A",
-                    'Ann Return': annual_return_pct,
-                    'Value Score': 3,
-                    'Recommendation': "⚪ Hold",
-                    'Sector': "Unknown"
-                })
-        
-        return stocks_data, None
-        
-    except Exception as e:
-        return None, str(e)
-
-# ============================================================
-# Tab Content Callback (Complete with all tabs)
+# Tab Content Callback
 # ============================================================
 
 @app.callback(
@@ -809,8 +681,7 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             html.H4("📊 Markowitz Portfolio Analysis", style={'color': '#2c3e50'}),
             html.P("Results shown in the charts above.", style={'color': '#27ae60'}),
             html.P(f"Analysis Period: {start_date} to {end_date}", style={'color': '#7f8c8d'}),
-            html.P(f"Data Source: {'Alpha Vantage (Cloud)' if IS_RENDER else 'Yahoo Finance (Local)'}", 
-                   style={'color': '#7f8c8d', 'fontSize': '12px'})
+            html.P("Data Source: Yahoo Finance (Real-time)", style={'color': '#7f8c8d', 'fontSize': '12px'})
         ])
     
     # ==================== TREYNOR-BLACK ACTIVE TAB ====================
@@ -874,62 +745,53 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             table
         ])
     
-    # ==================== VALUE SCREENER TAB (HYBRID) ====================
+    # ==================== VALUE SCREENER TAB ====================
     elif tab == 'value':
         if not selected_tickers:
             return html.Div("Select stocks to analyze")
         
         tickers_to_analyze = selected_tickers[:20]
         
-        # Show loading message
-        loading_div = html.Div([
-            html.Div("🔍 Fetching real-time valuation data...", 
-                    style={'text-align': 'center', 'padding': '20px', 'fontSize': '16px'}),
-            html.Div("This may take 15-30 seconds depending on API limits", 
-                    style={'text-align': 'center', 'color': '#7f8c8d', 'fontSize': '12px'}),
-            html.Div([
-                html.Div(className='loader', style={
-                    'border': '4px solid #f3f3f3',
-                    'borderTop': '4px solid #3498db',
-                    'borderRadius': '50%',
-                    'width': '40px',
-                    'height': '40px',
-                    'animation': 'spin 1s linear infinite',
-                    'margin': '20px auto'
-                })
-            ])
-        ], style={'padding': '20px'})
-        
         try:
-            # Get data based on environment
-            if IS_RENDER:
-                stocks_data, error = get_value_screener_data_cloud(
-                    tickers_to_analyze, _global_returns, start_date, end_date
-                )
-                source_name = "Alpha Vantage API"
-            else:
-                stocks_data = get_value_screener_data_local(
-                    tickers_to_analyze, _global_returns, start_date, end_date
-                )
-                error = None
-                source_name = "Yahoo Finance"
+            # Use Yahoo Finance directly
+            from core.data_fetcher import PortfolioDataFetcher
             
-            if error:
-                return html.Div([
-                    html.H3("⚠️ Error Loading Valuation Data", style={'color': '#e74c3c'}),
-                    html.P(error, style={'color': '#7f8c8d'}),
-                    html.Hr(),
-                    html.P("Troubleshooting:", style={'fontWeight': 'bold', 'marginTop': '15px'}),
-                    html.Ul([
-                        html.Li("Make sure ALPHA_VANTAGE_KEY is set in Render environment variables"),
-                        html.Li("Free tier limit: 5 API calls per minute - try fewer stocks"),
-                        html.Li("Wait 60 seconds and refresh the page"),
-                        html.Li("Check Render logs for more details")
-                    ])
-                ], style={'padding': '20px'})
+            print(f"🔍 Fetching value screener data for {len(tickers_to_analyze)} stocks using Yahoo Finance...")
+            
+            # Get company summaries
+            summaries_df = PortfolioDataFetcher.get_all_companies_summary(tickers_to_analyze)
+            
+            if summaries_df.empty:
+                return html.Div("No data available. Yahoo Finance may be rate limited. Please try again in a minute.")
+            
+            stocks_data = []
+            for _, row in summaries_df.iterrows():
+                ticker = row['ticker']
+                
+                # Get annual return from our returns data
+                if _global_returns is not None and ticker in _global_returns.columns:
+                    rets = _global_returns[ticker].dropna()
+                    if len(rets) > 0:
+                        annual_return = (1 + rets.mean()) ** 252 - 1
+                        annual_return_display = f"{annual_return*100:.1f}%"
+                    else:
+                        annual_return_display = row.get('annual_return', 'N/A')
+                else:
+                    annual_return_display = row.get('annual_return', 'N/A')
+                
+                stocks_data.append({
+                    'Ticker': ticker,
+                    'P/E': row.get('pe_ratio', 'N/A'),
+                    'P/B': row.get('pb_ratio', 'N/A'),
+                    'Div Yield': row.get('dividend_yield', 'N/A'),
+                    'Ann Return': annual_return_display,
+                    'Value Score': row.get('value_score', 3),
+                    'Recommendation': row.get('recommendation', '⚪ Hold'),
+                    'Sector': row.get('sector', 'Unknown')
+                })
             
             if not stocks_data:
-                return html.Div("No data available for selected stocks")
+                return html.Div("No valuation data available. Please try again.")
             
             # Sort by value score
             stocks_data.sort(key=lambda x: x['Value Score'] if isinstance(x['Value Score'], (int, float)) else 0, reverse=True)
@@ -987,10 +849,9 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             return html.Div([
                 html.H3("💰 Value Stock Screener", style={'margin-bottom': '15px', 'color': '#2c3e50'}),
                 
-                # Environment indicator
                 html.Div([
                     html.Span(
-                        f"🌐 Using {source_name} (Cloud)" if IS_RENDER else f"💻 Using {source_name} (Local)",
+                        "📊 Using Yahoo Finance (Real-time Data)",
                         style={'fontSize': '12px', 'color': '#7f8c8d', 'padding': '5px 10px', 
                                'backgroundColor': '#e8f4fd', 'borderRadius': '5px', 'display': 'inline-block'}
                     )
@@ -1039,27 +900,25 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
                 table,
                 
                 html.Div([
-                    html.P(f"ℹ️ Data Source: {source_name} | {'Free tier: 5 calls/minute' if IS_RENDER else 'Real-time data'}",
+                    html.P("ℹ️ Note: If some data shows 'N/A', Yahoo Finance may be rate limited. Refresh in 60 seconds.",
                           style={'fontSize': '11px', 'color': '#95a5a6', 'textAlign': 'center', 'marginTop': '15px'})
                 ])
             ])
             
         except Exception as e:
-            logger.error(f"Error in value screener: {str(e)}")
+            print(f"❌ Error in value screener: {str(e)}")
             import traceback
             traceback.print_exc()
             
             return html.Div([
-                html.H3("⚠️ Error Loading Valuation Data", style={'color': '#e74c3c'}),
-                html.P(f"Error: {str(e)[:200]}", style={'color': '#7f8c8d'}),
-                html.Hr(),
-                html.P("Possible solutions:", style={'fontWeight': 'bold', 'marginTop': '15px'}),
-                html.Ul([
-                    html.Li("Check if ALPHA_VANTAGE_KEY is set in Render environment variables"),
-                    html.Li("Free API key has limit of 5 calls per minute - try fewer stocks"),
-                    html.Li("Wait 60 seconds and refresh the page"),
-                    html.Li("Check Render logs for more details")
-                ])
+                html.H3("⚠️ Loading Valuation Data", style={'color': '#e74c3c'}),
+                html.P("Yahoo Finance is fetching data. Please wait 30 seconds and refresh.", 
+                       style={'color': '#7f8c8d'}),
+                html.P(f"Details: {str(e)[:100]}", style={'fontSize': '12px', 'color': '#95a5a6'}),
+                html.Button("🔄 Refresh Page", id="refresh-btn", n_clicks=0,
+                           style={'marginTop': '20px', 'padding': '10px 20px', 
+                                  'backgroundColor': '#3498db', 'color': 'white', 
+                                  'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer'})
             ], style={'padding': '20px'})
     
     # ==================== MONTE CARLO TAB ====================
@@ -1184,4 +1043,4 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
 # ============================================================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8050))
-    app.run(host='0.0.0.0', port=port, debug=False)  # Set debug=False for production
+    app.run(host='0.0.0.0', port=port, debug=False)
