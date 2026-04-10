@@ -23,6 +23,79 @@ from scipy import stats
 import time
 
 warnings.filterwarnings('ignore')
+# Add this after your existing imports (around line 25)
+import os
+import requests
+
+# ========== ALPHA VANTAGE INTEGRATION FOR RENDER ==========
+class AlphaVantageFetcher:
+    """Fetch real-time fundamentals from Alpha Vantage API"""
+    
+    API_KEY = os.environ.get("ALPHA_VANTAGE_KEY")
+    BASE_URL = "https://www.alphavantage.co/query"
+    
+    @classmethod
+    def get_fundamentals(cls, ticker):
+        """Get P/E, P/B, dividend, sector for a ticker"""
+        if not cls.API_KEY:
+            return None
+        
+        try:
+            params = {
+                'function': 'OVERVIEW',
+                'symbol': ticker,
+                'apikey': cls.API_KEY
+            }
+            response = requests.get(cls.BASE_URL, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data and 'Symbol' in data:
+                    # Parse dividend yield (convert from percentage to decimal)
+                    div_yield = data.get('DividendYield', '0')
+                    try:
+                        div_yield = float(div_yield) / 100 if div_yield and div_yield != 'None' else 0
+                    except:
+                        div_yield = 0
+                    
+                    # Parse P/E
+                    pe = data.get('PERatio', None)
+                    try:
+                        pe = float(pe) if pe and pe != 'None' else None
+                    except:
+                        pe = None
+                    
+                    # Parse P/B
+                    pb = data.get('PriceToBookRatio', None)
+                    try:
+                        pb = float(pb) if pb and pb != 'None' else None
+                    except:
+                        pb = None
+                    
+                    return {
+                        'pe': pe,
+                        'pb': pb,
+                        'dividend': div_yield,
+                        'sector': data.get('Sector', 'Unknown'),
+                        'industry': data.get('Industry', 'Unknown'),
+                        'name': data.get('Name', ticker)
+                    }
+        except Exception as e:
+            print(f"Alpha Vantage error for {ticker}: {e}")
+        
+        return None
+    
+    @classmethod
+    def get_batch_fundamentals(cls, tickers):
+        """Get fundamentals for multiple tickers with rate limiting"""
+        results = {}
+        for i, ticker in enumerate(tickers[:10]):  # Limit to 10 for performance
+            print(f"Fetching {ticker} from Alpha Vantage...")
+            data = cls.get_fundamentals(ticker)
+            if data:
+                results[ticker] = data
+            time.sleep(12)  # Rate limit: 5 calls per minute
+        return results
 
 from core.data_fetcher import PortfolioDataFetcher
 from core.optimizer import PortfolioOptimizer
