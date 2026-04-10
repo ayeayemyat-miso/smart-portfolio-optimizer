@@ -1,7 +1,8 @@
-# app/dashboard.py - Complete Version with Company Names in Selector and Sector Allocation
+# app/dashboard.py - Complete Production Version
 """
 Smart Portfolio Optimizer - Complete Version with Date Range Selection
 Includes: Markowitz, Treynor-Black, Value Screener, Monte Carlo, Portfolio Comparison
+Works on both Local (Yahoo Finance) and Render (Alpha Vantage)
 """
 
 import sys
@@ -21,6 +22,7 @@ import base64
 import io
 from scipy import stats
 import time
+import logging
 
 warnings.filterwarnings('ignore')
 
@@ -29,9 +31,16 @@ from core.optimizer import PortfolioOptimizer
 from core.evaluator import PerformanceEvaluator
 from core.treynor_black import TreynorBlackOptimizer
 
+# Configure logging for Render debugging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 server = app.server
 app.title = "Smart Portfolio Optimizer"
+
+# Detect environment
+IS_RENDER = os.environ.get('RENDER', False) or os.environ.get('ALPHA_VANTAGE_KEY') is not None
 
 # ============================================================
 # Expanded Stock Universe (35 well-diversified stocks)
@@ -111,7 +120,7 @@ def get_company_names_for_tickers(tickers):
     company_names = {}
     for ticker in tickers:
         company_names[ticker] = get_company_name(ticker)
-        time.sleep(0.05)  # Small delay to avoid rate limiting
+        time.sleep(0.05)
     return company_names
 
 def get_sector_for_ticker(ticker):
@@ -192,62 +201,6 @@ def fetch_data_for_dates(start_date, end_date, tickers):
     
     return daily_returns, benchmark_returns, _global_all_tickers
 
-def get_valuation_metrics(ticker):
-    """Get valuation metrics for a stock with scoring"""
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        return {
-            'pe': info.get('trailingPE', None),
-            'pb': info.get('priceToBook', None),
-            'dividend': info.get('dividendYield', 0),
-            'sector': info.get('sector', 'Unknown'),
-            'roe': info.get('returnOnEquity', None)
-        }
-    except:
-        return {'pe': None, 'pb': None, 'dividend': 0, 'sector': 'Unknown', 'roe': None}
-
-def calculate_value_score(pe, pb, annual_return, annual_vol, dividend):
-    """Calculate value score based on multiple factors"""
-    score = 0
-    
-    # P/E Score (lower is better)
-    if pe and isinstance(pe, (int, float)) and pe > 0:
-        if pe < 15: score += 3
-        elif pe < 20: score += 2
-        elif pe < 25: score += 1
-    
-    # P/B Score (lower is better)
-    if pb and isinstance(pb, (int, float)) and pb > 0:
-        if pb < 2: score += 2
-        elif pb < 3: score += 1
-    
-    # Return Score (higher is better)
-    if annual_return > 0.20: score += 3
-    elif annual_return > 0.10: score += 2
-    elif annual_return > 0.05: score += 1
-    
-    # Volatility Score (lower is better)
-    if annual_vol < 0.15: score += 2
-    elif annual_vol < 0.25: score += 1
-    
-    # Dividend Score
-    if dividend and dividend > 0.02:
-        score += 1
-    
-    return score
-
-def get_recommendation(score):
-    """Get recommendation based on score"""
-    if score >= 7:
-        return {'text': 'Strong Buy', 'color': '#155724', 'bg': '#d4edda', 'emoji': '🟢'}
-    elif score >= 5:
-        return {'text': 'Buy', 'color': '#856404', 'bg': '#fff3cd', 'emoji': '🟡'}
-    elif score >= 3:
-        return {'text': 'Hold', 'color': '#856404', 'bg': '#fff3cd', 'emoji': '🟠'}
-    else:
-        return {'text': 'Sell', 'color': '#721c24', 'bg': '#f8d7da', 'emoji': '🔴'}
-
 def create_excel_report(weights_df, metrics, port_returns, selected_tickers, start_date, end_date):
     """Create an Excel report with multiple sheets"""
     output = io.BytesIO()
@@ -258,9 +211,10 @@ def create_excel_report(weights_df, metrics, port_returns, selected_tickers, sta
         metrics_df.index.name = 'Metric'
         metrics_df.to_excel(writer, sheet_name='Performance Metrics')
         info_df = pd.DataFrame({
-            'Info': ['Analysis Start Date', 'Analysis End Date', 'Number of Assets', 'Generated On'],
+            'Info': ['Analysis Start Date', 'Analysis End Date', 'Number of Assets', 'Generated On', 'Data Source'],
             'Value': [start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), 
-                     len(selected_tickers), datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+                     len(selected_tickers), datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                     'Alpha Vantage (Cloud)' if IS_RENDER else 'Yahoo Finance (Local)']
         })
         info_df.to_excel(writer, sheet_name='Report Info', index=False)
         output.seek(0)
@@ -276,6 +230,13 @@ app.layout = html.Div([
                 style={'text-align': 'center', 'color': '#2c3e50', 'margin-top': '20px'}),
         html.P("Build optimal portfolios using Modern Portfolio Theory | Select any date range for analysis",
                style={'text-align': 'center', 'color': '#7f8c8d', 'margin-bottom': '20px'}),
+        html.Div([
+            html.Span(
+                "🌐 Running on Cloud (Alpha Vantage)" if IS_RENDER else "💻 Running Locally (Yahoo Finance)",
+                style={'fontSize': '12px', 'padding': '5px 10px', 'backgroundColor': '#e8f4fd', 
+                       'borderRadius': '5px', 'display': 'inline-block'}
+            )
+        ], style={'text-align': 'center', 'margin-bottom': '10px'}),
         html.Hr(),
     ]),
     
@@ -297,7 +258,7 @@ app.layout = html.Div([
             html.Label("📈 Select Stocks:", style={'font-weight': 'bold'}),
             dcc.Dropdown(
                 id='stock-selector',
-                options=[],  # Initially empty, will be populated after data loads
+                options=[],
                 value=['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META'],
                 multi=True,
                 placeholder="Search and select stocks...",
@@ -406,7 +367,6 @@ def load_data_on_date_change(start_date, end_date):
         options = []
         for ticker in tickers:
             company_name = company_names.get(ticker, ticker)
-            # Truncate long company names
             if len(company_name) > 45:
                 company_name = company_name[:42] + "..."
             options.append({
@@ -414,12 +374,12 @@ def load_data_on_date_change(start_date, end_date):
                 'value': ticker
             })
         
-        # Set default selection to first 5 available tickers
+        # Set default selection
         default_selection = [t for t in ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'META'] if t in tickers]
         if len(default_selection) < 2:
             default_selection = tickers[:5]
         
-        status = f"✅ Data loaded: {len(tickers)} stocks | {len(daily_returns)} days"
+        status = f"✅ Data loaded: {len(tickers)} stocks | {len(daily_returns)} days | Source: {'Alpha Vantage' if IS_RENDER else 'Yahoo Finance'}"
         
         return status, options, default_selection
         
@@ -699,7 +659,132 @@ def update_markowitz(selected_tickers, goal, rf, benchmark_symbol, start_date, e
     return fig_front, fig_weights, fig_rolling, fig_sector, summary, metrics_display
 
 # ============================================================
-# Tab Content Callback
+# Value Screener Helper Functions (for both local and cloud)
+# ============================================================
+
+def get_value_screener_data_local(tickers, returns_data, start_date, end_date):
+    """Get value screener data using Yahoo Finance (Local)"""
+    from core.data_fetcher import PortfolioDataFetcher
+    
+    stocks_data = []
+    summaries_df = PortfolioDataFetcher.get_all_companies_summary(tickers)
+    
+    for _, row in summaries_df.iterrows():
+        ticker = row['ticker']
+        if returns_data is not None and ticker in returns_data.columns:
+            rets = returns_data[ticker].dropna()
+            if len(rets) > 0:
+                annual_return = (1 + rets.mean()) ** 252 - 1
+                annual_return_display = f"{annual_return*100:.1f}%"
+            else:
+                annual_return_display = row.get('annual_return', 'N/A')
+        else:
+            annual_return_display = row.get('annual_return', 'N/A')
+        
+        stocks_data.append({
+            'Ticker': ticker,
+            'P/E': row.get('pe_ratio', 'N/A'),
+            'P/B': row.get('pb_ratio', 'N/A'),
+            'Div Yield': row.get('dividend_yield', 'N/A'),
+            'Ann Return': annual_return_display,
+            'Value Score': row.get('value_score', 3),
+            'Recommendation': row.get('recommendation', '⚪ Hold'),
+            'Sector': row.get('sector', 'Unknown')
+        })
+    
+    return stocks_data
+
+def get_value_screener_data_cloud(tickers, returns_data, start_date, end_date):
+    """Get value screener data using Alpha Vantage (Cloud/Render)"""
+    try:
+        from core.render_fundamentals import RenderFundamentalsFetcher
+        
+        if not RenderFundamentalsFetcher.is_available():
+            return None, "Alpha Vantage API key not configured. Please add ALPHA_VANTAGE_KEY to environment variables."
+        
+        fundamentals_data = RenderFundamentalsFetcher.get_batch_fundamentals(tickers, delay=1.2)
+        stocks_data = []
+        
+        for ticker in tickers:
+            data = fundamentals_data.get(ticker)
+            
+            # Get returns data
+            if returns_data is not None and ticker in returns_data.columns:
+                rets = returns_data[ticker].dropna()
+                if len(rets) > 0:
+                    annual_return = (1 + rets.mean()) ** 252 - 1
+                    annual_return_pct = f"{annual_return*100:.1f}%"
+                else:
+                    annual_return_pct = "N/A"
+            else:
+                annual_return_pct = "N/A"
+            
+            if data:
+                # Calculate value score
+                score = 3
+                pe = data.get('pe_ratio')
+                pb = data.get('pb_ratio')
+                div_yield = data.get('dividend_yield', 0)
+                
+                if pe and isinstance(pe, (int, float)) and pe > 0:
+                    if pe < 15: score += 2
+                    elif pe < 20: score += 1
+                    elif pe > 30: score -= 1
+                
+                if pb and isinstance(pb, (int, float)) and pb > 0:
+                    if pb < 2: score += 2
+                    elif pb < 3: score += 1
+                    elif pb > 5: score -= 1
+                
+                if div_yield and div_yield > 0:
+                    if div_yield > 0.04: score += 2
+                    elif div_yield > 0.02: score += 1
+                
+                if annual_return_pct != "N/A":
+                    annual_return_val = float(annual_return_pct.replace('%', '')) / 100
+                    if annual_return_val > 0.15: score += 2
+                    elif annual_return_val > 0.08: score += 1
+                
+                value_score = min(10, max(0, score))
+                
+                if value_score >= 7:
+                    rec = "🟢 Strong Buy"
+                elif value_score >= 5:
+                    rec = "🟡 Buy"
+                elif value_score >= 3:
+                    rec = "🟠 Hold"
+                else:
+                    rec = "🔴 Sell"
+                
+                stocks_data.append({
+                    'Ticker': ticker,
+                    'P/E': f"{pe:.1f}" if pe else "N/A",
+                    'P/B': f"{pb:.2f}" if pb else "N/A",
+                    'Div Yield': f"{div_yield*100:.1f}%" if div_yield and div_yield > 0 else "N/A",
+                    'Ann Return': annual_return_pct,
+                    'Value Score': value_score,
+                    'Recommendation': rec,
+                    'Sector': data.get('sector', 'Unknown')
+                })
+            else:
+                stocks_data.append({
+                    'Ticker': ticker,
+                    'P/E': "N/A",
+                    'P/B': "N/A",
+                    'Div Yield': "N/A",
+                    'Ann Return': annual_return_pct,
+                    'Value Score': 3,
+                    'Recommendation': "⚪ Hold",
+                    'Sector': "Unknown"
+                })
+        
+        return stocks_data, None
+        
+    except Exception as e:
+        return None, str(e)
+
+# ============================================================
+# Tab Content Callback (Complete with all tabs)
 # ============================================================
 
 @app.callback(
@@ -717,13 +802,15 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
     global _global_returns, _global_sp500
     
     if _global_returns is None:
-        return html.Div("Loading data...")
+        return html.Div("Loading data... Please wait")
     
     if tab == 'markowitz':
         return html.Div([
             html.H4("📊 Markowitz Portfolio Analysis", style={'color': '#2c3e50'}),
             html.P("Results shown in the charts above.", style={'color': '#27ae60'}),
-            html.P(f"Analysis Period: {start_date} to {end_date}", style={'color': '#7f8c8d'})
+            html.P(f"Analysis Period: {start_date} to {end_date}", style={'color': '#7f8c8d'}),
+            html.P(f"Data Source: {'Alpha Vantage (Cloud)' if IS_RENDER else 'Yahoo Finance (Local)'}", 
+                   style={'color': '#7f8c8d', 'fontSize': '12px'})
         ])
     
     # ==================== TREYNOR-BLACK ACTIVE TAB ====================
@@ -745,14 +832,14 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
         all_stats = []
         for ticker in selected_tickers:
             try:
-                stats = tb.compute_alpha_beta(ticker)
-                alpha_val = stats['alpha'] * 252 * 100
+                stats_data = tb.compute_alpha_beta(ticker)
+                alpha_val = stats_data['alpha'] * 252 * 100
                 all_stats.append({
                     'Ticker': ticker,
                     'Alpha (Annual)': f"{alpha_val:.2f}%",
-                    'Beta': f"{stats['beta']:.2f}",
-                    'p-value': f"{stats['p_value']:.3f}",
-                    'Significant': '✅ Yes' if stats['p_value'] < 0.10 else '❌ No'
+                    'Beta': f"{stats_data['beta']:.2f}",
+                    'p-value': f"{stats_data['p_value']:.3f}",
+                    'Significant': '✅ Yes' if stats_data['p_value'] < 0.10 else '❌ No'
                 })
             except:
                 continue
@@ -787,78 +874,193 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
             table
         ])
     
-    # ==================== VALUE SCREENER TAB ====================
+    # ==================== VALUE SCREENER TAB (HYBRID) ====================
     elif tab == 'value':
         if not selected_tickers:
             return html.Div("Select stocks to analyze")
         
-        stocks_data = []
-        for ticker in selected_tickers[:20]:
-            metrics = get_valuation_metrics(ticker)
-            rets = _global_returns[ticker].dropna()
-            annual_return = (1 + rets.mean()) ** 252 - 1
-            annual_vol = rets.std() * np.sqrt(252)
-            
-            score = calculate_value_score(
-                metrics['pe'], metrics['pb'], 
-                annual_return, annual_vol, 
-                metrics['dividend']
-            )
-            rec = get_recommendation(score)
-            
-            stocks_data.append({
-                'Ticker': ticker,
-                'P/E': f"{metrics['pe']:.1f}" if metrics['pe'] else 'N/A',
-                'P/B': f"{metrics['pb']:.1f}" if metrics['pb'] else 'N/A',
-                'Div Yield': f"{metrics['dividend']*100:.1f}%" if metrics['dividend'] else 'N/A',
-                'Ann Return': f"{annual_return*100:.1f}%",
-                'Value Score': score,
-                'Recommendation': f"{rec['emoji']} {rec['text']}",
-                'Sector': metrics['sector']
-            })
+        tickers_to_analyze = selected_tickers[:20]
         
-        stocks_data.sort(key=lambda x: x['Value Score'], reverse=True)
-        
-        table = dash_table.DataTable(
-            data=stocks_data,
-            columns=[{'name': c, 'id': c} for c in stocks_data[0].keys()],
-            style_cell={'textAlign': 'center'},
-            style_header={'backgroundColor': '#2c3e50', 'color': 'white'},
-            style_data_conditional=[
-                {
-                    'if': {'filter_query': '{Value Score} >= 7'},
-                    'backgroundColor': '#d4edda',
-                    'color': '#155724'
-                },
-                {
-                    'if': {'filter_query': '{Value Score} >= 5 && {Value Score} < 7'},
-                    'backgroundColor': '#fff3cd',
-                    'color': '#856404'
-                },
-                {
-                    'if': {'filter_query': '{Value Score} < 5'},
-                    'backgroundColor': '#f8d7da',
-                    'color': '#721c24'
-                }
-            ],
-            page_size=15
-        )
-        
-        return html.Div([
-            html.H3("💰 Value Stock Screener", style={'margin-bottom': '20px'}),
-            html.P(f"Analysis Period: {start_date} to {end_date}", style={'color': '#7f8c8d'}),
+        # Show loading message
+        loading_div = html.Div([
+            html.Div("🔍 Fetching real-time valuation data...", 
+                    style={'text-align': 'center', 'padding': '20px', 'fontSize': '16px'}),
+            html.Div("This may take 15-30 seconds depending on API limits", 
+                    style={'text-align': 'center', 'color': '#7f8c8d', 'fontSize': '12px'}),
             html.Div([
-                html.H4("📊 Scoring System:"),
-                html.Ul([
-                    html.Li("🟢 Strong Buy (7+): Excellent value, strong fundamentals"),
-                    html.Li("🟡 Buy (5-6): Good value, positive momentum"),
-                    html.Li("🟠 Hold (3-4): Fairly valued, monitor"),
-                    html.Li("🔴 Sell (0-2): Overvalued or weak fundamentals")
+                html.Div(className='loader', style={
+                    'border': '4px solid #f3f3f3',
+                    'borderTop': '4px solid #3498db',
+                    'borderRadius': '50%',
+                    'width': '40px',
+                    'height': '40px',
+                    'animation': 'spin 1s linear infinite',
+                    'margin': '20px auto'
+                })
+            ])
+        ], style={'padding': '20px'})
+        
+        try:
+            # Get data based on environment
+            if IS_RENDER:
+                stocks_data, error = get_value_screener_data_cloud(
+                    tickers_to_analyze, _global_returns, start_date, end_date
+                )
+                source_name = "Alpha Vantage API"
+            else:
+                stocks_data = get_value_screener_data_local(
+                    tickers_to_analyze, _global_returns, start_date, end_date
+                )
+                error = None
+                source_name = "Yahoo Finance"
+            
+            if error:
+                return html.Div([
+                    html.H3("⚠️ Error Loading Valuation Data", style={'color': '#e74c3c'}),
+                    html.P(error, style={'color': '#7f8c8d'}),
+                    html.Hr(),
+                    html.P("Troubleshooting:", style={'fontWeight': 'bold', 'marginTop': '15px'}),
+                    html.Ul([
+                        html.Li("Make sure ALPHA_VANTAGE_KEY is set in Render environment variables"),
+                        html.Li("Free tier limit: 5 API calls per minute - try fewer stocks"),
+                        html.Li("Wait 60 seconds and refresh the page"),
+                        html.Li("Check Render logs for more details")
+                    ])
+                ], style={'padding': '20px'})
+            
+            if not stocks_data:
+                return html.Div("No data available for selected stocks")
+            
+            # Sort by value score
+            stocks_data.sort(key=lambda x: x['Value Score'] if isinstance(x['Value Score'], (int, float)) else 0, reverse=True)
+            
+            # Create the table
+            table = dash_table.DataTable(
+                data=stocks_data,
+                columns=[
+                    {'name': 'Ticker', 'id': 'Ticker'},
+                    {'name': 'P/E', 'id': 'P/E'},
+                    {'name': 'P/B', 'id': 'P/B'},
+                    {'name': 'Div Yield', 'id': 'Div Yield'},
+                    {'name': 'Ann Return', 'id': 'Ann Return'},
+                    {'name': 'Value Score', 'id': 'Value Score'},
+                    {'name': 'Recommendation', 'id': 'Recommendation'},
+                    {'name': 'Sector', 'id': 'Sector'}
+                ],
+                style_cell={'textAlign': 'center', 'padding': '8px', 'fontSize': '12px'},
+                style_header={
+                    'backgroundColor': '#2c3e50', 
+                    'color': 'white', 
+                    'fontWeight': 'bold',
+                    'fontSize': '13px'
+                },
+                style_data_conditional=[
+                    {
+                        'if': {'filter_query': '{Value Score} >= 7'},
+                        'backgroundColor': '#d4edda',
+                        'color': '#155724',
+                        'fontWeight': 'bold'
+                    },
+                    {
+                        'if': {'filter_query': '{Value Score} >= 5 && {Value Score} < 7'},
+                        'backgroundColor': '#fff3cd',
+                        'color': '#856404'
+                    },
+                    {
+                        'if': {'filter_query': '{Value Score} < 5 && {Value Score} > 0'},
+                        'backgroundColor': '#f8d7da',
+                        'color': '#721c24'
+                    }
+                ],
+                page_size=15,
+                sort_action='native',
+                filter_action='native',
+                style_table={'overflowX': 'auto', 'overflowY': 'auto', 'height': 'auto'}
+            )
+            
+            # Calculate summary stats
+            valid_scores = [s['Value Score'] for s in stocks_data if isinstance(s['Value Score'], (int, float))]
+            avg_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
+            buy_count = len([s for s in stocks_data if 'Buy' in s['Recommendation'] or 'Strong Buy' in s['Recommendation']])
+            sell_count = len([s for s in stocks_data if 'Sell' in s['Recommendation']])
+            
+            return html.Div([
+                html.H3("💰 Value Stock Screener", style={'margin-bottom': '15px', 'color': '#2c3e50'}),
+                
+                # Environment indicator
+                html.Div([
+                    html.Span(
+                        f"🌐 Using {source_name} (Cloud)" if IS_RENDER else f"💻 Using {source_name} (Local)",
+                        style={'fontSize': '12px', 'color': '#7f8c8d', 'padding': '5px 10px', 
+                               'backgroundColor': '#e8f4fd', 'borderRadius': '5px', 'display': 'inline-block'}
+                    )
+                ], style={'marginBottom': '15px'}),
+                
+                html.P(f"Analysis Period: {start_date} to {end_date}", 
+                       style={'color': '#7f8c8d', 'marginBottom': '15px', 'fontSize': '13px'}),
+                
+                # Summary cards
+                html.Div([
+                    html.Div([
+                        html.H4("📊 Portfolio Summary", style={'margin': '0 0 10px 0', 'fontSize': '16px'}),
+                        html.Div([
+                            html.Div([
+                                html.Div("Average Score", style={'fontSize': '11px', 'color': '#7f8c8d'}),
+                                html.Div(f"{avg_score:.1f}/10", style={'fontSize': '20px', 'fontWeight': 'bold', 'color': '#3498db'})
+                            ], style={'display': 'inline-block', 'margin': '8px', 'padding': '12px', 
+                                     'background': '#f8f9fa', 'borderRadius': '8px', 'minWidth': '120px'}),
+                            html.Div([
+                                html.Div("Buy Signals", style={'fontSize': '11px', 'color': '#7f8c8d'}),
+                                html.Div(f"{buy_count}", style={'fontSize': '20px', 'fontWeight': 'bold', 'color': '#27ae60'})
+                            ], style={'display': 'inline-block', 'margin': '8px', 'padding': '12px', 
+                                     'background': '#f8f9fa', 'borderRadius': '8px', 'minWidth': '120px'}),
+                            html.Div([
+                                html.Div("Sell Signals", style={'fontSize': '11px', 'color': '#7f8c8d'}),
+                                html.Div(f"{sell_count}", style={'fontSize': '20px', 'fontWeight': 'bold', 'color': '#e74c3c'})
+                            ], style={'display': 'inline-block', 'margin': '8px', 'padding': '12px', 
+                                     'background': '#f8f9fa', 'borderRadius': '8px', 'minWidth': '120px'}),
+                        ], style={'textAlign': 'center'})
+                    ], style={'background': 'white', 'padding': '15px', 'borderRadius': '8px', 
+                            'marginBottom': '15px', 'boxShadow': '0 1px 3px rgba(0,0,0,0.1)'}),
+                ]),
+                
+                # Scoring explanation
+                html.Div([
+                    html.H4("📊 Scoring System:", style={'marginTop': '0', 'marginBottom': '8px', 'fontSize': '14px'}),
+                    html.Div([
+                        html.Span("🟢 Strong Buy (7-10)  ", style={'color': '#155724'}),
+                        html.Span("🟡 Buy (5-6)  ", style={'color': '#856404'}),
+                        html.Span("🟠 Hold (3-4)  ", style={'color': '#856404'}),
+                        html.Span("🔴 Sell (0-2)", style={'color': '#721c24'})
+                    ], style={'fontSize': '12px'})
+                ], style={'background': '#f8f9fa', 'padding': '12px', 'borderRadius': '8px', 'marginBottom': '15px'}),
+                
+                html.H4("📋 Stock Rankings:", style={'marginTop': '15px', 'marginBottom': '10px', 'fontSize': '16px'}),
+                table,
+                
+                html.Div([
+                    html.P(f"ℹ️ Data Source: {source_name} | {'Free tier: 5 calls/minute' if IS_RENDER else 'Real-time data'}",
+                          style={'fontSize': '11px', 'color': '#95a5a6', 'textAlign': 'center', 'marginTop': '15px'})
                 ])
-            ], style={'background': '#f8f9fa', 'padding': '15px', 'border-radius': '10px', 'margin-bottom': '20px'}),
-            html.H4("Stock Rankings:", style={'margin-top': '20px'}),
-            table
-        ])
+            ])
+            
+        except Exception as e:
+            logger.error(f"Error in value screener: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+            return html.Div([
+                html.H3("⚠️ Error Loading Valuation Data", style={'color': '#e74c3c'}),
+                html.P(f"Error: {str(e)[:200]}", style={'color': '#7f8c8d'}),
+                html.Hr(),
+                html.P("Possible solutions:", style={'fontWeight': 'bold', 'marginTop': '15px'}),
+                html.Ul([
+                    html.Li("Check if ALPHA_VANTAGE_KEY is set in Render environment variables"),
+                    html.Li("Free API key has limit of 5 calls per minute - try fewer stocks"),
+                    html.Li("Wait 60 seconds and refresh the page"),
+                    html.Li("Check Render logs for more details")
+                ])
+            ], style={'padding': '20px'})
     
     # ==================== MONTE CARLO TAB ====================
     elif tab == 'monte':
@@ -982,4 +1184,4 @@ def update_tabs(tab, selected_tickers, goal, rf, benchmark_symbol, start_date, e
 # ============================================================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8050))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)  # Set debug=False for production
