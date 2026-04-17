@@ -3,7 +3,7 @@
 A comprehensive interactive dashboard for portfolio optimization using Modern Portfolio Theory (Markowitz), active portfolio management (Treynor-Black), value stock screening, Monte Carlo simulation, and portfolio comparison.
 
 🌐 Live Demo
-Try it yourself:(https://smart-portfolio-optimizer-0cr4.onrender.com/)
+Try it yourself:([https://smart-portfolio-optimizer-0cr4.onrender.com/](https://smart-portfolio-optimizer-6p2z.onrender.com/))
 
 Note: The free tier may take 1-5 minutes to wake up after inactivity.
 📊 Dashboard Preview
